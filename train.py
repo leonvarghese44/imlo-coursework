@@ -51,7 +51,12 @@ def train():
     image_size = 192
     batch_size = 32
     epochs = 30
-    learning_rate = 0.001
+
+    lr_schedule = (
+        [0.001] * 24 +
+        [0.0005] * 4 +
+        [0.0002] * 2
+    )
 
     train_transform = transforms.Compose([
         transforms.Resize((image_size, image_size)),
@@ -135,7 +140,7 @@ def train():
     loss_function = nn.CrossEntropyLoss()
     optimiser = optim.Adam(
         model.parameters(),
-        lr=learning_rate,
+        lr=lr_schedule[0],
         weight_decay=0.0001
     )
 
@@ -145,10 +150,15 @@ def train():
     print("Validation images:", len(val_dataset))
     print("Epochs:", epochs)
     print("Batch size:", batch_size)
-    print("Learning rate:", learning_rate)
     print("Image size:", image_size)
+    print("Learning rate schedule:", lr_schedule)
 
     for epoch in range(epochs):
+        current_lr = lr_schedule[epoch]
+
+        for param_group in optimiser.param_groups:
+            param_group["lr"] = current_lr
+
         model.train()
 
         running_loss = 0.0
@@ -171,6 +181,7 @@ def train():
         val_accuracy = calculate_accuracy(model, val_loader, device)
 
         print("Epoch:", epoch + 1)
+        print("Learning rate:", current_lr)
         print("Loss:", average_loss)
         print("Validation accuracy:", val_accuracy)
 
