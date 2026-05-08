@@ -1,3 +1,5 @@
+import random
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,6 +10,16 @@ from torchvision import transforms
 from tqdm import tqdm
 
 from model import SimpleCNN
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def calculate_accuracy(model, dataloader, device):
@@ -31,52 +43,110 @@ def calculate_accuracy(model, dataloader, device):
 
 
 def train():
-    torch.manual_seed(42)
+    set_seed(42)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
 
-    transform = transforms.Compose([
-        transforms.Resize((128, 128)),
-        transforms.ToTensor()
+    image_size = 192
+    batch_size = 32
+    epochs = 30
+    learning_rate = 0.001
+
+    train_transform = transforms.Compose([
+        transforms.Resize((image_size, image_size)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(8),
+        transforms.ColorJitter(
+            brightness=0.1,
+            contrast=0.1,
+            saturation=0.1
+        ),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.5, 0.5, 0.5],
+            std=[0.5, 0.5, 0.5]
+        )
     ])
 
-    full_trainval_dataset = OxfordIIITPet(
+    eval_transform = transforms.Compose([
+        transforms.Resize((image_size, image_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.5, 0.5, 0.5],
+            std=[0.5, 0.5, 0.5]
+        )
+    ])
+
+    full_dataset_for_split = OxfordIIITPet(
         root="data",
         split="trainval",
         target_types="category",
         download=True,
-        transform=transform
+        transform=None
     )
 
-    train_size = int(0.8 * len(full_trainval_dataset))
-    val_size = len(full_trainval_dataset) - train_size
+    train_size = int(0.8 * len(full_dataset_for_split))
+    val_size = len(full_dataset_for_split) - train_size
 
-    train_dataset, val_dataset = random_split(
-        full_trainval_dataset,
+    train_subset, val_subset = random_split(
+        full_dataset_for_split,
         [train_size, val_size],
         generator=torch.Generator().manual_seed(42)
     )
 
+    train_dataset_full = OxfordIIITPet(
+        root="data",
+        split="trainval",
+        target_types="category",
+        download=True,
+        transform=train_transform
+    )
+
+    val_dataset_full = OxfordIIITPet(
+        root="data",
+        split="trainval",
+        target_types="category",
+        download=True,
+        transform=eval_transform
+    )
+
+    train_dataset = torch.utils.data.Subset(train_dataset_full, train_subset.indices)
+    val_dataset = torch.utils.data.Subset(val_dataset_full, val_subset.indices)
+
     train_loader = DataLoader(
         train_dataset,
-        batch_size=32,
-        shuffle=True
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+        pin_memory=True
     )
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=32,
-        shuffle=False
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=True
     )
 
     model = SimpleCNN(num_classes=37).to(device)
 
     loss_function = nn.CrossEntropyLoss()
-    optimiser = optim.Adam(model.parameters(), lr=0.001)
+    optimiser = optim.Adam(
+        model.parameters(),
+        lr=learning_rate,
+        weight_decay=0.0001
+    )
 
-    epochs = 1
     best_val_accuracy = 0.0
+
+    print("Training images:", len(train_dataset))
+    print("Validation images:", len(val_dataset))
+    print("Epochs:", epochs)
+    print("Batch size:", batch_size)
+    print("Learning rate:", learning_rate)
+    print("Image size:", image_size)
 
     for epoch in range(epochs):
         model.train()
@@ -97,13 +167,11 @@ def train():
 
             running_loss += loss.item()
 
-        train_accuracy = calculate_accuracy(model, train_loader, device)
-        val_accuracy = calculate_accuracy(model, val_loader, device)
         average_loss = running_loss / len(train_loader)
+        val_accuracy = calculate_accuracy(model, val_loader, device)
 
         print("Epoch:", epoch + 1)
         print("Loss:", average_loss)
-        print("Train accuracy:", train_accuracy)
         print("Validation accuracy:", val_accuracy)
 
         if val_accuracy > best_val_accuracy:

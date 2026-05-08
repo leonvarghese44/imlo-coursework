@@ -30,9 +30,16 @@ def test():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
 
-    transform = transforms.Compose([
-        transforms.Resize((128, 128)),
-        transforms.ToTensor()
+    image_size = 192
+    batch_size = 32
+
+    test_transform = transforms.Compose([
+        transforms.Resize((image_size, image_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.5, 0.5, 0.5],
+            std=[0.5, 0.5, 0.5]
+        )
     ])
 
     test_dataset = OxfordIIITPet(
@@ -40,13 +47,15 @@ def test():
         split="test",
         target_types="category",
         download=True,
-        transform=transform
+        transform=test_transform
     )
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=32,
-        shuffle=False
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=True
     )
 
     model = SimpleCNN(num_classes=37).to(device)
