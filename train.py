@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 from torchvision.datasets import OxfordIIITPet
 from torchvision import transforms
 from tqdm import tqdm
@@ -83,24 +83,7 @@ def train():
         )
     ])
 
-    full_dataset_for_split = OxfordIIITPet(
-        root="data",
-        split="trainval",
-        target_types="category",
-        download=True,
-        transform=None
-    )
-
-    train_size = int(0.8 * len(full_dataset_for_split))
-    val_size = len(full_dataset_for_split) - train_size
-
-    train_subset, val_subset = random_split(
-        full_dataset_for_split,
-        [train_size, val_size],
-        generator=torch.Generator().manual_seed(42)
-    )
-
-    train_dataset_full = OxfordIIITPet(
+    train_dataset = OxfordIIITPet(
         root="data",
         split="trainval",
         target_types="category",
@@ -108,16 +91,13 @@ def train():
         transform=train_transform
     )
 
-    val_dataset_full = OxfordIIITPet(
+    train_eval_dataset = OxfordIIITPet(
         root="data",
         split="trainval",
         target_types="category",
         download=True,
         transform=eval_transform
     )
-
-    train_dataset = torch.utils.data.Subset(train_dataset_full, train_subset.indices)
-    val_dataset = torch.utils.data.Subset(val_dataset_full, val_subset.indices)
 
     train_loader = DataLoader(
         train_dataset,
@@ -127,8 +107,8 @@ def train():
         pin_memory=True
     )
 
-    val_loader = DataLoader(
-        val_dataset,
+    train_eval_loader = DataLoader(
+        train_eval_dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=0,
@@ -144,10 +124,8 @@ def train():
         weight_decay=0.0001
     )
 
-    best_val_accuracy = 0.0
-
     print("Training images:", len(train_dataset))
-    print("Validation images:", len(val_dataset))
+    print("Validation images: 0")
     print("Epochs:", epochs)
     print("Batch size:", batch_size)
     print("Image size:", image_size)
@@ -178,20 +156,16 @@ def train():
             running_loss += loss.item()
 
         average_loss = running_loss / len(train_loader)
-        val_accuracy = calculate_accuracy(model, val_loader, device)
+        train_accuracy = calculate_accuracy(model, train_eval_loader, device)
 
         print("Epoch:", epoch + 1)
         print("Learning rate:", current_lr)
         print("Loss:", average_loss)
-        print("Validation accuracy:", val_accuracy)
+        print("Train accuracy:", train_accuracy)
 
-        if val_accuracy > best_val_accuracy:
-            best_val_accuracy = val_accuracy
-            torch.save(model.state_dict(), "model.pth")
-            print("Saved model.pth")
-
+    torch.save(model.state_dict(), "model.pth")
+    print("Saved model.pth")
     print("Finished training")
-    print("Best validation accuracy:", best_val_accuracy)
 
 
 if __name__ == "__main__":
