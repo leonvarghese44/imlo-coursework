@@ -46,10 +46,13 @@ class PetTrimapDataset(torch.utils.data.Dataset):
 
         trimap_array = np.array(trimap)
 
-        pet_mask = (trimap_array == 1).astype(np.float32)
-        pet_mask_tensor = torch.from_numpy(pet_mask).unsqueeze(0)
+        trimap_channel = np.zeros_like(trimap_array, dtype=np.float32)
+        trimap_channel[trimap_array == 3] = 0.5
+        trimap_channel[trimap_array == 1] = 1.0
 
-        combined = torch.cat([image_tensor, pet_mask_tensor], dim=0)
+        trimap_tensor = torch.from_numpy(trimap_channel).unsqueeze(0)
+
+        combined = torch.cat([image_tensor, trimap_tensor], dim=0)
 
         return combined, label
 
