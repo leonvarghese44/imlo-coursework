@@ -6,10 +6,86 @@ import torch.optim as optim
 
 from torch.utils.data import DataLoader
 from torchvision.datasets import OxfordIIITPet
-from torchvision import transforms
+from torchvision.transforms import functional as F
+from torchvision.transforms import InterpolationMode
 from tqdm import tqdm
 
 from model import SimpleCNN
+
+
+class PetTrimapDataset(torch.utils.data.Dataset):
+    def __init__(self, base_dataset, image_size, train):
+        self.base_dataset = base_dataset
+        self.image_size = image_size
+        self.train = train
+
+    def __len__(self):
+        return len(self.base_dataset)
+
+    def __getitem__(self, index):
+        image, target = self.base_dataset[index]
+        label, trimap = target
+
+        image = image.convert("RGB")
+        trimap = trimap.convert("L")
+
+        image = F.resize(
+            image,
+            [self.image_size, self.image_size],
+            interpolation=InterpolationMode.BILINEAR
+        )
+
+        trimap = F.resize(
+            trimap,
+            [self.image_size, self.image_size],
+            interpolation=InterpolationMode.NEAREST
+        )
+
+        if self.train:
+            if random.random() < 0.5:
+                image = F.hflip(image)
+                trimap = F.hflip(trimap)
+
+            angle = random.uniform(-8, 8)
+
+            image = F.rotate(
+                image,
+                angle,
+                interpolation=InterpolationMode.BILINEAR,
+                fill=0
+            )
+
+            trimap = F.rotate(
+                trimap,
+                angle,
+                interpolation=InterpolationMode.NEAREST,
+                fill=2
+            )
+
+            brightness = random.uniform(0.9, 1.1)
+            contrast = random.uniform(0.9, 1.1)
+            saturation = random.uniform(0.9, 1.1)
+
+            image = F.adjust_brightness(image, brightness)
+            image = F.adjust_contrast(image, contrast)
+            image = F.adjust_saturation(image, saturation)
+
+        image_tensor = F.to_tensor(image)
+
+        image_tensor = F.normalize(
+            image_tensor,
+            mean=[0.5, 0.5, 0.5],
+            std=[0.5, 0.5, 0.5]
+        )
+
+        trimap_array = np.array(trimap)
+
+        pet_mask = (trimap_array == 1).astype(np.float32)
+        pet_mask_tensor = torch.from_numpy(pet_mask).unsqueeze(0)
+
+        combined = torch.cat([image_tensor, pet_mask_tensor], dim=0)
+
+        return combined, label
 
 
 def set_seed(seed):
@@ -58,45 +134,25 @@ def train():
         [0.0002] * 2
     )
 
-    train_transform = transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(8),
-        transforms.ColorJitter(
-            brightness=0.1,
-            contrast=0.1,
-            saturation=0.1
-        ),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.5, 0.5, 0.5],
-            std=[0.5, 0.5, 0.5]
-        )
-    ])
-
-    eval_transform = transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.5, 0.5, 0.5],
-            std=[0.5, 0.5, 0.5]
-        )
-    ])
-
-    train_dataset = OxfordIIITPet(
+    train_base_dataset = OxfordIIITPet(
         root="data",
         split="trainval",
-        target_types="category",
+        target_types=["category", "segmentation"],
         download=True,
-        transform=train_transform
+        transform=None,
+        target_transform=None
     )
 
-    train_eval_dataset = OxfordIIITPet(
-        root="data",
-        split="trainval",
-        target_types="category",
-        download=True,
-        transform=eval_transform
+    train_dataset = PetTrimapDataset(
+        base_dataset=train_base_dataset,
+        image_size=image_size,
+        train=True
+    )
+
+    train_eval_dataset = PetTrimapDataset(
+        base_dataset=train_base_dataset,
+        image_size=image_size,
+        train=False
     )
 
     train_loader = DataLoader(
@@ -118,6 +174,7 @@ def train():
     model = SimpleCNN(num_classes=37).to(device)
 
     loss_function = nn.CrossEntropyLoss()
+
     optimiser = optim.Adam(
         model.parameters(),
         lr=lr_schedule[0],
@@ -129,6 +186,7 @@ def train():
     print("Epochs:", epochs)
     print("Batch size:", batch_size)
     print("Image size:", image_size)
+    print("Input channels: 4")
     print("Learning rate schedule:", lr_schedule)
 
     for epoch in range(epochs):
@@ -164,6 +222,7 @@ def train():
         print("Train accuracy:", train_accuracy)
 
     torch.save(model.state_dict(), "model.pth")
+
     print("Saved model.pth")
     print("Finished training")
 

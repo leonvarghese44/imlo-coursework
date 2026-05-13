@@ -21,7 +21,7 @@ class SimpleCNN(nn.Module):
         super(SimpleCNN, self).__init__()
 
         self.features = nn.Sequential(
-            ConvBlock(3, 32),
+            ConvBlock(4, 32),
             ConvBlock(32, 32),
             nn.MaxPool2d(2),
 

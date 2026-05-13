@@ -1,9 +1,57 @@
+import numpy as np
 import torch
+
 from torch.utils.data import DataLoader
 from torchvision.datasets import OxfordIIITPet
-from torchvision import transforms
+from torchvision.transforms import functional as F
+from torchvision.transforms import InterpolationMode
 
 from model import SimpleCNN
+
+
+class PetTrimapDataset(torch.utils.data.Dataset):
+    def __init__(self, base_dataset, image_size):
+        self.base_dataset = base_dataset
+        self.image_size = image_size
+
+    def __len__(self):
+        return len(self.base_dataset)
+
+    def __getitem__(self, index):
+        image, target = self.base_dataset[index]
+        label, trimap = target
+
+        image = image.convert("RGB")
+        trimap = trimap.convert("L")
+
+        image = F.resize(
+            image,
+            [self.image_size, self.image_size],
+            interpolation=InterpolationMode.BILINEAR
+        )
+
+        trimap = F.resize(
+            trimap,
+            [self.image_size, self.image_size],
+            interpolation=InterpolationMode.NEAREST
+        )
+
+        image_tensor = F.to_tensor(image)
+
+        image_tensor = F.normalize(
+            image_tensor,
+            mean=[0.5, 0.5, 0.5],
+            std=[0.5, 0.5, 0.5]
+        )
+
+        trimap_array = np.array(trimap)
+
+        pet_mask = (trimap_array == 1).astype(np.float32)
+        pet_mask_tensor = torch.from_numpy(pet_mask).unsqueeze(0)
+
+        combined = torch.cat([image_tensor, pet_mask_tensor], dim=0)
+
+        return combined, label
 
 
 def calculate_accuracy(model, dataloader, device):
@@ -33,21 +81,18 @@ def test():
     image_size = 192
     batch_size = 32
 
-    test_transform = transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.5, 0.5, 0.5],
-            std=[0.5, 0.5, 0.5]
-        )
-    ])
-
-    test_dataset = OxfordIIITPet(
+    base_test_dataset = OxfordIIITPet(
         root="data",
         split="test",
-        target_types="category",
+        target_types=["category", "segmentation"],
         download=True,
-        transform=test_transform
+        transform=None,
+        target_transform=None
+    )
+
+    test_dataset = PetTrimapDataset(
+        base_dataset=base_test_dataset,
+        image_size=image_size
     )
 
     test_loader = DataLoader(
@@ -59,7 +104,10 @@ def test():
     )
 
     model = SimpleCNN(num_classes=37).to(device)
-    model.load_state_dict(torch.load("model.pth", map_location=device))
+
+    model.load_state_dict(
+        torch.load("model.pth", map_location=device)
+    )
 
     test_accuracy = calculate_accuracy(model, test_loader, device)
 
